@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+
+"""primize
+Find group-specific primer binding sites for amplicon metabarcoding
+
+Usage:
+  primize [options] -t INT <msa.fa>
+
+Options:
+  -t --target-seqs INT    number of target sequences (from top of alignment)
+  -l --primer-length INT  primer length [default: 20]
+  -p --penalty INT        penalty [default: 2]
+"""
+
+import sys
+from Bio import AlignIO
+import math
+import sys
+from collections import Counter
+from statistics import mean
+from docopt import docopt
+
+
+def main():
+
+    if len(sys.argv) == 1:
+        sys.argv.append('-h')
+
+    opt = docopt(__doc__, version='primize v0.2.0', options_first=True)
+    print(opt)
+
+    contrast_msa(opt['<msa.fa>'], int(opt['--target-seqs']),
+                 int(opt['--primer-length']), int(opt['--penalty']), 2)
+            
+
+def contrast_msa(msa_file, n_seqs_a, primer_length, penalty, printing=2):
+
+	# Step 1: Read the MSA file
+	dict = {}
+
+
+	# get most abundant letter and frequency in set
+
+	def consensus(chars, charsb):
+		counts = Counter(chars)
+		com = counts.most_common(1)
+		com0 = com[0]
+		c = com0[0]
+		countpla = Counter(charsb)
+		if c != '-':
+			TP = counts[c]
+			FN = len(chars) - TP
+			FP = countpla[c]
+			TN = len(charsb) - FP
+		else:
+			TP = 0
+			FN = 1
+			FP = 1
+			TN = 0
+		return(c, TP, FN, FP, TN)
+
+	# Step 2: Calculate the consensus for each position
+	alignment = AlignIO.read(msa_file, "fasta")
+	alignment_length = alignment.get_alignment_length()
+	alignment_records = list(alignment)
+
+	# Create a list to store the conservation scores
+	for position in range(alignment_length):
+		# Extract the column at the current position
+		col = [record[position] for record in alignment_records]
+		col_a = col[:n_seqs_a]
+		col_b = col[n_seqs_a:]
+		cns = consensus(col_a, col_b)
+		F_score = (2*cns[1])/((2*cns[1]) + (cns[2]) + penalty*(cns[3])) #F = 2TP/(2TP+FN+FP)
+		threshold = 0.90
+		if printing == 1:						#printing == 1 is for finding positions with highest F_scores
+			value = threshold
+			if F_score > value:
+				print(f"position {position+1 : 9}: [{F_score}]")
+		if printing == 2:						#==2 is for making the dictionary with averages
+			dict[position+1] = F_score
+		if printing == 3:						#==3 is for printing the F-scores of certain region
+			if position in range(3125, 3138):
+				print(f"position {position+1 : 9}: [{F_score}]")
+		#Try to find region with highest average F-score
+	primer_length = primer_length
+	F_average = {}
+	for pos in range(1, (len(dict)-primer_length)):
+	       	list_of_values = []
+	       	for i in range(pos, (pos+primer_length)):
+	               	list_of_values.append(dict[i])
+	       	F_avg = mean(list_of_values)
+	       	F_average[pos] = F_avg
+	#Find the largest, average F value
+	maxF = max(F_average, key=F_average.get)
+	print(f"The best position to start a primer with length {primer_length} is {maxF}, the average F-score is {F_average[maxF]}")
+	F_average[maxF] = 0
+	maxF2 = max(F_average, key=F_average.get)
+	print(f"The 2nd position to start a primer with length {primer_length} is {maxF2}, the average F-score is {F_average[maxF2]}")
+
+	return(maxF, maxF2)
+
+
+if __name__ == "__main__":
+	main()
