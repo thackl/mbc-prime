@@ -9,97 +9,116 @@ Usage:
 Options:
   -t --target-seqs INT    number of target sequences (from top of alignment)
   -l --primer-length INT  primer length [default: 20]
-  -p --penalty INT        penalty [default: 2]
+  -s --score NUM          minimum F-score [default: 0.9]
+  -v --verbose            print verbose information, such as partial alignments for each primer locus
+
+  -b --beta NUM           DEPRECATED F-score beta factor [default: 1]
 """
 
 import sys
-from Bio import AlignIO
-import math
-import sys
-from collections import Counter
+from math import sqrt
 from statistics import mean
+from statistics import median 
+from collections import Counter
+from Bio import AlignIO
+from Bio.Align import MultipleSeqAlignment
 from docopt import docopt
-
 
 def main():
 
     if len(sys.argv) == 1:
         sys.argv.append('-h')
 
-    opt = docopt(__doc__, version='primize v0.2.0', options_first=True)
+    opt = docopt(__doc__, version='primize v0.3.0', options_first=True)
     print(opt)
+    min_score = float(opt['--score'])
+    primer_length = int(opt['--primer-length'])
+    n_targets = int(opt['--target-seqs'])
 
-    contrast_msa(opt['<msa.fa>'], int(opt['--target-seqs']),
-                 int(opt['--primer-length']), int(opt['--penalty']), 2)
+    msa = AlignIO.read(opt['<msa.fa>'], "fasta")
+    contrasts = contrast_msa(msa, n_targets, primer_length)
+
+    behind = int(primer_length/2)
+    ahead = primer_length - behind -1
+    j=0;
+
+    for i,(a,b,t,_,an, bn, s) in enumerate(contrasts):
+        if t > min_score and s > min_score:
+            j+=1;
+            print(i, a, b, round((t+s)/2, 2), round(t,2), round(s,2),
+                  "".join([f"{k}{v}" for k,v in an.most_common()]),
+                  "".join([f"{k}{v}" for k,v in bn.most_common()]))
+            if(opt['--verbose']):
+                print(" "*behind + "*")
+                print(msa[:n_targets, i-behind:i+ahead])
+                print(msa[n_targets:, i-behind:i+ahead])
+                print("-" * 80);
+    print(f"Found {j} high-scoring loci")
+
+def contrast_msa(msa, x, primer_length):
+
+    msa_len = msa.get_alignment_length()
+    # msa = MultipleSeqAlignment([r.upper() for r in msa])
+    
+    cols = [list(score_column(msa[:x, i], msa[x:, i])) for i in range(msa_len)]
+    
+    behind = int(primer_length/2)
+    ahead = primer_length - behind -1
+    pre = [float(0)] * behind
+    post = [float(0)] * ahead
+    consense = pre + mean_window([c[3] for c in cols], primer_length) + post
+    [cols[i].append(s) for i,s in enumerate(consense)]
+    return(cols)
+
             
 
-def contrast_msa(msa_file, n_seqs_a, primer_length, penalty, printing=2):
+def score_column(a, b, beta=1):
+    an = Counter(a)
+    bn = Counter(b)
+    (ac, TP) = an.most_common(1)[0]
+    (bc, TN) = bn.most_common(1)[0]
 
-	# Step 1: Read the MSA file
-	dict = {}
+    if ac == '-':
+        return(ac, bc, 0, 0, an, bn)
 
+    tn = len(a) - an['-']
+    FN = tn - TP
+    FP = bn[ac]
+    return (ac, bc, mcc(TP, TN, FP, FN), TP/tn, an, bn)
+    #return ac, bc, fbeta(TP, FN, FP, beta), TP/tn
 
-	# get most abundant letter and frequency in set
+# https://en.wikipedia.org/wiki/Phi_coefficient
+def mcc(TP, TN, FP, FN):
+    denom = (TP+FP) * (TP+FN) * (TN+FP) * (TN+FN)
+    if denom == 0:
+        denom = 1
+    else:
+        denom = sqrt(denom)
+        
+    return((TP * TN - FP * FN) / denom)
 
-	def consensus(chars, charsb):
-		counts = Counter(chars)
-		com = counts.most_common(1)
-		com0 = com[0]
-		c = com0[0]
-		countpla = Counter(charsb)
-		if c != '-':
-			TP = counts[c]
-			FN = len(chars) - TP
-			FP = countpla[c]
-			TN = len(charsb) - FP
-		else:
-			TP = 0
-			FN = 1
-			FP = 1
-			TN = 0
-		return(c, TP, FN, FP, TN)
+# https://en.wikipedia.org/wiki/F-score
+def fbeta(TP, FN, FP, beta):
+    b2 = beta**2
+    return((1+b2)*TP / ((1+b2)*TP + b2*FN + FP))
 
-	# Step 2: Calculate the consensus for each position
-	alignment = AlignIO.read(msa_file, "fasta")
-	alignment_length = alignment.get_alignment_length()
-	alignment_records = list(alignment)
+# https://en.wikipedia.org/wiki/F-score
+def fscore(TP, FN, FP):
+    return(2*TP / (2*TP + FN + FP))
 
-	# Create a list to store the conservation scores
-	for position in range(alignment_length):
-		# Extract the column at the current position
-		col = [record[position] for record in alignment_records]
-		col_a = col[:n_seqs_a]
-		col_b = col[n_seqs_a:]
-		cns = consensus(col_a, col_b)
-		F_score = (2*cns[1])/((2*cns[1]) + (cns[2]) + penalty*(cns[3])) #F = 2TP/(2TP+FN+FP)
-		threshold = 0.90
-		if printing == 1:						#printing == 1 is for finding positions with highest F_scores
-			value = threshold
-			if F_score > value:
-				print(f"position {position+1 : 9}: [{F_score}]")
-		if printing == 2:						#==2 is for making the dictionary with averages
-			dict[position+1] = F_score
-		if printing == 3:						#==3 is for printing the F-scores of certain region
-			if position in range(3125, 3138):
-				print(f"position {position+1 : 9}: [{F_score}]")
-		#Try to find region with highest average F-score
-	primer_length = primer_length
-	F_average = {}
-	for pos in range(1, (len(dict)-primer_length)):
-	       	list_of_values = []
-	       	for i in range(pos, (pos+primer_length)):
-	               	list_of_values.append(dict[i])
-	       	F_avg = mean(list_of_values)
-	       	F_average[pos] = F_avg
-	#Find the largest, average F value
-	maxF = max(F_average, key=F_average.get)
-	print(f"The best position to start a primer with length {primer_length} is {maxF}, the average F-score is {F_average[maxF]}")
-	F_average[maxF] = 0
-	maxF2 = max(F_average, key=F_average.get)
-	print(f"The 2nd position to start a primer with length {primer_length} is {maxF2}, the average F-score is {F_average[maxF2]}")
+def fkoert(TP, FN, FP, penalty):
+    return(2*TP / (2*TP + FN + penalty*FP)) #F = 2TP
 
-	return(maxF, maxF2)
+def mean_window(x, window_size):
+    i = 0
+    means = [] 
 
-
+    while i < len(x) - window_size + 1: 
+        window = x[i : i + window_size] 
+        means.append(sum(window) / window_size)
+        i += 1
+        
+    return(means)
+        
 if __name__ == "__main__":
-	main()
+    main()
