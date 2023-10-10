@@ -4,8 +4,8 @@
 # download workflow
 git clone https://github.com/thackl/mbc-prime
 
-  mbc-prime [options] -t INT <msa.fa>
-
+mbc-prime -h                          # show help
+mbc-prime [options] -t INT <msa.fa>   # run tool
 #+end_src
 
 ** Input
