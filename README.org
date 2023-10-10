@@ -4,7 +4,7 @@
 # download workflow
 git clone https://github.com/thackl/mbc-prime
 
-  primize [options] -t INT <msa.fa>
+  mbc-prime [options] -t INT <msa.fa>
 
 #+end_src
 
