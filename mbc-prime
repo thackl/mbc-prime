@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
 
-"""primize
+"""mbc-prime
 Find group-specific primer binding sites for amplicon metabarcoding
 
 Usage:
-  primize [options] -t INT <msa.fa>
+  mbc-prime [options] -t INT <msa.fa>
 
 Options:
   -t --target-seqs INT    number of target sequences (from top of alignment)
   -l --primer-length INT  primer length [default: 20]
-  -s --score NUM          minimum F-score [default: 0.9]
-  -v --verbose            print verbose information, such as partial alignments for each primer locus
+  -s --score NUM          minimum score for both conservation and discrimination
+                          [default: 0.9]
+  -v --verbose            print verbose information, such as partial alignments
+                          for each primer locus
 
-  -b --beta NUM           DEPRECATED F-score beta factor [default: 1]
+  -b --beta NUM           Use F-score instead of Matthews correlation coefficient.
+                          Use `-b=1` for regular F-score/F1. Other values for
+                          F-beta scoring emphazising either False Positives or
+                          True Negative. [default: -1]
 """
 
 import sys
@@ -29,14 +34,15 @@ def main():
     if len(sys.argv) == 1:
         sys.argv.append('-h')
 
-    opt = docopt(__doc__, version='primize v0.3.0', options_first=True)
+    opt = docopt(__doc__, version='mbc-prime v0.3.0', options_first=True)
     print(opt)
     min_score = float(opt['--score'])
     primer_length = int(opt['--primer-length'])
     n_targets = int(opt['--target-seqs'])
+    beta = float(opt['--beta'])
 
     msa = AlignIO.read(opt['<msa.fa>'], "fasta")
-    contrasts = contrast_msa(msa, n_targets, primer_length)
+    contrasts = contrast_msa(msa, n_targets, primer_length, beta)
 
     behind = int(primer_length/2)
     ahead = primer_length - behind -1
@@ -55,12 +61,12 @@ def main():
                 print("-" * 80);
     print(f"Found {j} high-scoring loci")
 
-def contrast_msa(msa, x, primer_length):
+def contrast_msa(msa, x, primer_length, beta):
 
     msa_len = msa.get_alignment_length()
     # msa = MultipleSeqAlignment([r.upper() for r in msa])
     
-    cols = [list(score_column(msa[:x, i], msa[x:, i])) for i in range(msa_len)]
+    cols = [list(score_column(msa[:x, i], msa[x:, i], beta)) for i in range(msa_len)]
     
     behind = int(primer_length/2)
     ahead = primer_length - behind -1
@@ -72,7 +78,7 @@ def contrast_msa(msa, x, primer_length):
 
             
 
-def score_column(a, b, beta=1):
+def score_column(a, b, beta=-1):
     an = Counter(a)
     bn = Counter(b)
     (ac, TP) = an.most_common(1)[0]
@@ -84,8 +90,10 @@ def score_column(a, b, beta=1):
     tn = len(a) - an['-']
     FN = tn - TP
     FP = bn[ac]
-    return (ac, bc, mcc(TP, TN, FP, FN), TP/tn, an, bn)
-    #return ac, bc, fbeta(TP, FN, FP, beta), TP/tn
+    if beta < 0:
+        return (ac, bc, mcc(TP, TN, FP, FN), TP/tn, an, bn)
+    else:
+        return (ac, bc, fbeta(TP, FN, FP, float(beta)), TP/tn, an, bn)
 
 # https://en.wikipedia.org/wiki/Phi_coefficient
 def mcc(TP, TN, FP, FN):

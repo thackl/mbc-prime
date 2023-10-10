@@ -1,0 +1,21 @@
+** Usage
+
+#+begin_src sh
+# download workflow
+git clone https://github.com/thackl/mbc-prime
+
+  primize [options] -t INT <msa.fa>
+
+#+end_src
+
+** Input
+- =msa.fa= :: multiple-sequence alignment of region of interest with target
+  group sequences at the top and sequences to exclude at the bottom.
+
+** Output
+TODO...
+
+The pipeline produces the following final files in =results/=:
+- =<sample_id>_classified.tsv= :: tab-separated file with one line per classified query with the fields:
+  =query_id, query_tophit_identity, query_tophit_coverage, query_tophits_consensus_lineage=
+
