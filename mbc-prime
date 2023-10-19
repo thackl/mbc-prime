@@ -82,7 +82,7 @@ def score_column(a, b, beta=-1):
     an = Counter(a)
     bn = Counter(b)
     (ac, TP) = an.most_common(1)[0]
-    (bc, TN) = bn.most_common(1)[0]
+    (bc, bnmc) = bn.most_common(1)[0]
 
     if ac == '-':
         return(ac, bc, 0, 0, an, bn)
@@ -90,6 +90,7 @@ def score_column(a, b, beta=-1):
     tn = len(a) - an['-']
     FN = tn - TP
     FP = bn[ac]
+    TN = len(b) - FP - bn['-']
     if beta < 0:
         return (ac, bc, mcc(TP, TN, FP, FN), TP/tn, an, bn)
     else:
