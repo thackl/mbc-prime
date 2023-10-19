@@ -51,7 +51,7 @@ def main():
     for i,(a,b,t,_,an, bn, s) in enumerate(contrasts):
         if t > min_score and s > min_score:
             j+=1;
-            print(i, a, b, round((t+s)/2, 2), round(t,2), round(s,2),
+            print(i+1, a, b, round((t+s)/2, 2), round(t,2), round(s,2),
                   "".join([f"{k}{v}" for k,v in an.most_common()]),
                   "".join([f"{k}{v}" for k,v in bn.most_common()]))
             if(opt['--verbose']):
