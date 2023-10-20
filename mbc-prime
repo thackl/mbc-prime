@@ -18,9 +18,11 @@ Options:
                           Use `-b=1` for regular F-score/F1. Other values for
                           F-beta scoring emphazising either False Positives or
                           True Negative. [default: -1]
+  -r --reverse            Shifts the window where conservation is calculated to a window for a reverse primer
 """
 
 import sys
+import numpy as np
 from math import sqrt
 from statistics import mean
 from statistics import median 
@@ -40,41 +42,70 @@ def main():
     primer_length = int(opt['--primer-length'])
     n_targets = int(opt['--target-seqs'])
     beta = float(opt['--beta'])
+    reverse = opt['--reverse']
 
+    if(reverse):
+    	behind = 0
+    	ahead = primer_length
+    else:
+        behind = primer_length -1
+        ahead = 1
+    
     msa = AlignIO.read(opt['<msa.fa>'], "fasta")
-    contrasts = contrast_msa(msa, n_targets, primer_length, beta)
+    msa = msa[0:,190:330]
+    contrasts = contrast_msa(msa, n_targets, primer_length, min_score, beta)
 
-    behind = int(primer_length/2)
-    ahead = primer_length - behind -1
-    j=0;
+    [print(e) for e in contrasts]
+    
+    for e in contrasts:
+        print(e)
+        if(opt['--verbose']):
+            print(" "*behind + "*")
+            print(msa[:n_targets, e["start"]:e["start"]+primer_length])
+            print(msa[n_targets:, e["start"]:e["start"]+primer_length])
+            sys.exit()
+            print("-" * 80);
+    print(f"Found {len(contrasts)} high-scoring loci")
 
-    for i,(a,b,t,_,an, bn, s) in enumerate(contrasts):
-        if t > min_score and s > min_score:
-            j+=1;
-            print(i+1, a, b, round((t+s)/2, 2), round(t,2), round(s,2),
-                  "".join([f"{k}{v}" for k,v in an.most_common()]),
-                  "".join([f"{k}{v}" for k,v in bn.most_common()]))
-            if(opt['--verbose']):
-                print(" "*behind + "*")
-                print(msa[:n_targets, i-behind:i+ahead])
-                print(msa[n_targets:, i-behind:i+ahead])
-                print("-" * 80);
-    print(f"Found {j} high-scoring loci")
-
-def contrast_msa(msa, x, primer_length, beta):
+def contrast_msa(msa, x, primer_length, min_score, beta):
 
     msa_len = msa.get_alignment_length()
-    # msa = MultipleSeqAlignment([r.upper() for r in msa])
-    
+    # TODO MSA trim gap cols
+
+    # score each column
     cols = [list(score_column(msa[:x, i], msa[x:, i], beta)) for i in range(msa_len)]
-    
-    behind = int(primer_length/2)
-    ahead = primer_length - behind -1
-    pre = [float(0)] * behind
-    post = [float(0)] * ahead
-    consense = pre + mean_window([c[3] for c in cols], primer_length) + post
-    [cols[i].append(s) for i,s in enumerate(consense)]
-    return(cols)
+
+    # aggregate across windows
+    conserve = conserve_window([c[3] for c in cols], primer_length)
+    contrast_fwd = contrast_window([c[2] for c in cols], primer_length)
+    contrast_rev = contrast_window([c[2] for c in cols], primer_length, reverse=True)
+    # inefficient, could compute consense windows only as needed after filter
+    consense = consense_window([(c[0], c[1]) for c in cols], primer_length)
+
+    wins_fwd = []
+    wins_rev = []
+    # filter windows
+    for i,s in enumerate(conserve):
+        if s > min_score:
+            
+            if contrast_fwd[i]["t"] > min_score:
+                wins_fwd.append({
+                    "start": i,
+                    "s": round(conserve[i], 2),
+                    "diff": consense[i],
+                    "t": round(contrast_fwd[i]["t"], 2),
+                    "t_wgt": [round(x, 2) for x in contrast_fwd[i]["t_wgt"]],
+                    "t_raw": [round(x, 2) for x in contrast_fwd[i]["t_raw"]]
+                })
+            if contrast_rev[i]["t"] > min_score:
+                wins_rev.append({
+                    "start": i,
+                    "s": conserve[i],
+                    "t": contrast_rev[i]["t"],
+                    "diff_fwd": consense[i]
+                })
+
+    return(wins_fwd)
 
             
 
@@ -118,7 +149,7 @@ def fscore(TP, FN, FP):
 def fkoert(TP, FN, FP, penalty):
     return(2*TP / (2*TP + FN + penalty*FP)) #F = 2TP
 
-def mean_window(x, window_size):
+def conserve_window(x, window_size):
     i = 0
     means = [] 
 
@@ -128,6 +159,46 @@ def mean_window(x, window_size):
         i += 1
         
     return(means)
-        
+
+def contrast_window(x, window_size, reverse=False):
+    i = 0
+    scores = list()
+    weights = [(window_size - j) / window_size for j in range(window_size)]
+    if not reverse:
+        weights.reverse()
+    
+    while i < len(x) - window_size + 1: 
+        w = x[i : i + window_size]
+        w = top_q(w) # ignore lower scores
+        s = [w[j] * weights[j] for j,_ in enumerate(w)] # weight scores by position
+        scores.append({
+            "t": sum(s),
+            "t_raw": list(filter(lambda x: x > 0 , w)),
+            "t_wgt": list(filter(lambda x: x > 0 , s))
+         })
+        i += 1
+
+    return(scores)
+
+def consense_pair(a, b):
+    if a == b:
+        return "."
+    return(a)
+
+def consense_window(x, window_size):
+    i = 0
+    x = [consense_pair(a,b) for a,b in x]
+    consensi = []
+    
+    while i < len(x) - window_size + 1: 
+        consensi.append("".join(x[i : i + window_size]))
+        i += 1
+
+    return(consensi)
+
+def top_q(x, q=.5):
+    r = [0 if k < q else k for k in x]
+    return(r)
+
 if __name__ == "__main__":
     main()
