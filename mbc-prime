@@ -29,7 +29,17 @@ from statistics import median
 from collections import Counter
 from Bio import AlignIO
 from Bio.Align import MultipleSeqAlignment
+from Bio.Align.AlignInfo import SummaryInfo
 from docopt import docopt
+import functools
+import edlib
+
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(levelname)s %(asctime)s] %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%SZ")
 
 def main():
 
@@ -40,9 +50,54 @@ def main():
     print(opt)
     min_score = float(opt['--score'])
     primer_length = int(opt['--primer-length'])
-    n_targets = int(opt['--target-seqs'])
+    x = int(opt['--target-seqs'])
     beta = float(opt['--beta'])
     reverse = opt['--reverse']
+    max_gap_frac = .1
+
+    
+    # read msa
+    logging.info("Importing MSA")
+    msa = AlignIO.read(opt['<msa.fa>'], "fasta")
+    n_cols_raw = msa.get_alignment_length()
+
+    # trim gap cols (TODO)
+    logging.info("Trimming and masking gaps")
+    msa = trim_msa(msa, max_gap_frac = max_gap_frac)
+    msa = mask_term_gaps(msa) # replace term gaps with ?
+    n_cols = msa.get_alignment_length()
+    logging.info(f"  trimmed from {n_cols_raw} to {n_cols} informative columns (<{max_gap_frac * 100}% gaps)")
+
+    # get contrast + conserve score for each col to prefilter promising loci
+    logging.info("Scoring for contrast and conservation")
+    col_scores = [score_column(msa[:x, i], msa[x:, i], beta) for i in range(n_cols)]
+    win_conserve = conserve_window([c['conserve_score'] for c in col_scores], primer_length)
+    win_contrast = contrast_window([c['contrast_score'] for c in col_scores], primer_length, min_score)
+
+    win_top = []
+    for i,(s,t) in enumerate(zip(win_conserve, win_contrast)):
+        if s > min_score and t['t'] > min_score:
+            t['i'] = i
+            win_top.append(t)
+
+    # compute edit distances
+    logging.info(f"Computing distances for {len(win_top)} candidate loci")
+    bda = block_dist(msa[:x], primer_length)
+    bdb = block_dist_ref(msa[x:], [b['seq'] for b in bda], primer_length)
+    for i,_ in enumerate(win_top):
+        if i%3:
+            continue
+        a = bda[win_top[i]['i']]
+        b = bdb[win_top[i]['i']]
+        a_sum = sum([a[i] for i in [0,1,2,-1]])
+        a_frc = [round(a[i]/a_sum, 2) for i in [0,1,2,-1]]
+        b_sum = sum([b[i] for i in [0,1,2,-1]])
+        b_frc = [round(b[i]/b_sum, 2) for i in [0,1,2,-1]]
+        #print(win_top[i])
+        print(i, a_frc, b_frc, a["seq"], b["target_aligned"], b["matched_aligned"], b["query_aligned"], sep="\t")
+    sys.exit()
+        
+    # maximize left-/rightness of contrast columns
 
     if(reverse):
     	behind = 0
@@ -51,10 +106,6 @@ def main():
         behind = primer_length -1
         ahead = 1
     
-    msa = AlignIO.read(opt['<msa.fa>'], "fasta")
-    msa = msa[0:,190:330]
-    contrasts = contrast_msa(msa, n_targets, primer_length, min_score, beta)
-
     [print(e) for e in contrasts]
     
     for e in contrasts:
@@ -67,16 +118,27 @@ def main():
             print("-" * 80);
     print(f"Found {len(contrasts)} high-scoring loci")
 
+def trim_msa(msa, max_gap_frac):
+    n_cols = msa.get_alignment_length()
+    max_gaps = len(msa) * max_gap_frac
+    keep_i = []
+    for i in range(n_cols):
+        if msa[:, i].count("-") <= max_gaps:
+            keep_i.append(i)
+
+    keep_cols = [msa[:,i:i+1] for i in keep_i]
+    re = functools.reduce(lambda a, b: a+b, keep_cols)
+    return(re)
+
 def contrast_msa(msa, x, primer_length, min_score, beta):
 
-    msa_len = msa.get_alignment_length()
-    # TODO MSA trim gap cols
+    n_cols = msa.get_alignment_length()
 
     # score each column
-    cols = [list(score_column(msa[:x, i], msa[x:, i], beta)) for i in range(msa_len)]
+    col_scores = [score_column(msa[:x, i], msa[x:, i], beta) for i in range(n_cols)]
 
     # aggregate across windows
-    conserve = conserve_window([c[3] for c in cols], primer_length)
+    win_conserve = conserve_window([c[3] for c in cols], primer_length)
     contrast_fwd = contrast_window([c[2] for c in cols], primer_length)
     contrast_rev = contrast_window([c[2] for c in cols], primer_length, reverse=True)
     # inefficient, could compute consense windows only as needed after filter
@@ -107,26 +169,37 @@ def contrast_msa(msa, x, primer_length, min_score, beta):
 
     return(wins_fwd)
 
-            
-
 def score_column(a, b, beta=-1):
     an = Counter(a)
     bn = Counter(b)
     (ac, TP) = an.most_common(1)[0]
     (bc, bnmc) = bn.most_common(1)[0]
 
+    re = {
+        'contrast_score': 0,
+        'conserve_score': 0,
+        'char_a': ac,
+        'char_b': bc,
+        'counts_a': an,
+        'counts_b': bn
+    }
+
     if ac == '-':
-        return(ac, bc, 0, 0, an, bn)
+        return(re)
 
     tn = len(a) - an['-']
     FN = tn - TP
     FP = bn[ac]
     TN = len(b) - FP - bn['-']
-    if beta < 0:
-        return (ac, bc, mcc(TP, TN, FP, FN), TP/tn, an, bn)
-    else:
-        return (ac, bc, fbeta(TP, FN, FP, float(beta)), TP/tn, an, bn)
 
+    re['conserve_score'] = TP/tn
+    if beta < 0:
+        re['contrast_score'] = mcc(TP, TN, FP, FN)
+    else:
+        re['contrast_score'] = fbeta(TP, FN, FP, float(beta))
+
+    return(re)
+    
 # https://en.wikipedia.org/wiki/Phi_coefficient
 def mcc(TP, TN, FP, FN):
     denom = (TP+FP) * (TP+FN) * (TN+FP) * (TN+FN)
@@ -160,7 +233,27 @@ def conserve_window(x, window_size):
         
     return(means)
 
-def contrast_window(x, window_size, reverse=False):
+def contrast_window(x, window_size, min_score):
+    i = 0
+    scores = list()
+    
+    while i < len(x) - window_size + 1: 
+        w = x[i : i + window_size]
+        w = top_q(w, min_score) # ignore lower scores
+        scores.append({
+            "t": sum(w),
+            "t_raw": w,
+        })
+        i += 1
+
+    return(scores)
+
+def top_q(x, q=.5, low=0):
+    r = [low if k < q else k for k in x]
+    return(r)
+
+# DEPRECATED
+def contrast_window_weighted(x, window_size, reverse=False):
     i = 0
     scores = list()
     weights = [(window_size - j) / window_size for j in range(window_size)]
@@ -180,6 +273,105 @@ def contrast_window(x, window_size, reverse=False):
 
     return(scores)
 
+def mask_term_gaps(msa, char="?"):
+    n_cols = msa.get_alignment_length()
+    re = []
+    for r in msa:
+        r.seq = r.seq.lstrip("-")
+        n_pre = n_cols - len(r.seq)
+        r.seq = "?" * n_pre + r.seq
+        r.seq = r.seq.rstrip("-")
+        n_suf = n_cols - len(r.seq)
+        r.seq = r.seq + "?" * n_suf
+        re.append(r)
+
+    return(MultipleSeqAlignment(re))
+
+# compute distance between each seq of a msa block consensus and each sequence
+# in the block
+def block_dist(msa, window_size, max_term_gap_frac = 0, term_gap_char = "?"):
+    i = 0
+    dists = []
+    n_cols = msa.get_alignment_length() - window_size + 1
+    n_seqs = len(msa)
+    max_term_gaps = window_size * max_term_gap_frac
+    
+    while i < n_cols:
+        block = msa[:, i:i+window_size]
+        # filter out terminal gap seqs
+        block = list(filter(lambda x: x.seq.count('?') <= max_term_gaps, block))
+        block_seqs = Counter([str(r.seq) for r in block])
+        block_dist =  {0: 0, 1: 0, 2: 0, 3: 0, -1: 0,
+            -2: n_seqs - len(block), "seq": None}
+
+        if(len(block_seqs) == 1):
+            block_dist["seq"] = list(block_seqs.keys())[0]
+            block_dist[0] = len(block)
+            
+        elif(len(block_seqs) > 1):
+            ref, ref_n = block_seqs.most_common(1)[0]
+            ref.replace("-", "") # remove gaps in ref so we done score - matches - as positive in align
+            del block_seqs[ref]
+            seqs = list(block_seqs.keys())
+            seq_counts = list(block_seqs.values())
+            seq_dists = [edlib.align(seq, ref, mode='HW', task='distance', k=3)["editDistance"] for seq in seqs]
+
+            block_dist["seq"] = ref
+            block_dist[0] = ref_n
+            for k,v in zip(seq_dists, seq_counts):
+                if not k in block_dist:
+                    block_dist[k] = v
+                else:
+                    block_dist[k] += v
+
+                
+#        print(block_dist)
+        dists.append(block_dist)
+        i+=1
+
+    return(dists)
+
+def block_dist_ref(msa, refs, window_size, max_term_gap_frac = 0, term_gap_char = "?"):
+    i = 0
+    dists = []
+    n_cols = msa.get_alignment_length() - window_size + 1
+    n_seqs = len(msa)
+    max_term_gaps = window_size * max_term_gap_frac
+    
+    while i < n_cols:
+        block = msa[:, i:i+window_size]
+        # filter out terminal gap seqs
+        block = list(filter(lambda x: x.seq.count('?') <= max_term_gaps, block))
+        block_seqs = Counter([str(r.seq) for r in block])
+        block_dist =  {0: 0, 1: 0, 2: 0, 3: 0, -1: 0,
+            -2: n_seqs - len(block), "seq": None}
+
+        if(len(block_seqs) > 0):
+            ref = refs[i]
+            ref.replace("-", "") # remove gaps in ref so we done score - matches - as positive in align
+            seqs = list(block_seqs.keys())
+            seq_counts = list(block_seqs.values())
+            seq_dists = [edlib.align(seq, ref, mode='HW', task='distance', k=3)["editDistance"] for seq in seqs]
+
+            block_dist["seq"] = block_seqs.most_common(1)[0][0]
+            for k,v in zip(seq_dists, seq_counts):
+                if not k in block_dist:
+                    block_dist[k] = v
+                else:
+                    block_dist[k] += v
+
+            ref_aln = edlib.align(block_dist["seq"], ref, mode='HW', task='path')
+            ref_aln_nice = edlib.getNiceAlignment(ref_aln, block_dist["seq"], ref)
+            block_dist.update(ref_aln_nice)
+
+                
+#        print(block_dist)
+        dists.append(block_dist)
+        i+=1
+
+    return(dists)
+
+
 def consense_pair(a, b):
     if a == b:
         return "."
@@ -196,9 +388,6 @@ def consense_window(x, window_size):
 
     return(consensi)
 
-def top_q(x, q=.5):
-    r = [0 if k < q else k for k in x]
-    return(r)
 
 if __name__ == "__main__":
     main()
