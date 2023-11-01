@@ -55,7 +55,7 @@ def main():
     x = int(opt['--target-seqs'])
     beta = float(opt['--beta'])
     reverse = opt['--reverse']
-    max_gap_frac = .1
+    min_nongap_frac = .2
 
     
     # read msa
@@ -64,15 +64,17 @@ def main():
     n_cols_raw = msa.get_alignment_length()
 
     # trim gap cols (TODO)
-    logging.info("Trimming and masking gaps")
-    msa = trim_msa(msa, max_gap_frac = max_gap_frac)
+    logging.info("Trimming internal and masking terminal gaps")
+    msa = trim_msa(msa, min_nongap_frac = min_nongap_frac)
+    msa_orig_i = msa.column_annotations['orig_i']
+
     msa = mask_term_gaps(msa) # replace term gaps with ?
     n_cols = msa.get_alignment_length()
 
     with open(opt['<msa.fa>'] + "trimmed", "w") as handle:
         AlignIO.write(msa, handle, "fasta")
 
-    logging.info(f"• trimmed from {n_cols_raw} to {n_cols} informative columns (<{max_gap_frac * 100}% gaps)")
+    logging.info(f"• trimmed from {n_cols_raw} to {n_cols} informative columns (<{min_nongap_frac * 100}% gaps)")
 
     # DEPRECATED: Brute-forcing alignments seems even better
     # get contrast + conserve score for each col to prefilter promising loci
@@ -99,8 +101,9 @@ def main():
     ii = -2
     g = 0
 
-    print('group', 'pos', 'score', 'A: 0/1/2/3/4+ mm | unaligned',
-          'B: 0/1/2/3/4+ mm | unaligned', 'primer A', 'closest B',
+    
+    print('group', 'pos', 'trimmed_pos', 'score', 'A: 0,1,2,3,4+ mismatches',
+          'B: 0,1,2,3,4+ mismatches', 'primer A', 'closest B',
           'A-B-matched', 'A-aligned', 'B-aligned', sep = "\t")
     for i,_ in enumerate(win_dist):
 
@@ -123,7 +126,7 @@ def main():
         #print(win_top[i])
         # print(round(win_conserve[i], 2), round(win_contrast[i]['t']/2, 2),
         #       sep="\t", end="\t")
-        print(g, i+1, ab_score, a_frc, b_frc, a["a_rep"], a["matched_aligned"],
+        print(g, msa_orig_i[i]+1, i+1, ab_score, a_frc, b_frc, a["a_rep"], a["matched_aligned"],
               a["target_aligned"], a["query_aligned"], _, sep="\t")
     sys.exit()
         
@@ -132,12 +135,14 @@ def main():
 
     print(f"Found {len(contrasts)} high-scoring loci")
 
-def trim_msa(msa, max_gap_frac):
+def trim_msa(msa, min_nongap_frac):
     n_cols = msa.get_alignment_length()
-    max_gaps = len(msa) * max_gap_frac
+    max_gaps = round(len(msa) * (1-min_nongap_frac))
+    logging.info(f"• max gaps per column: {max_gaps}")
     keep_i = []
     for i in range(n_cols):
-        if msa[:, i].count("-") <= max_gaps:
+        n_gaps = msa[:, i].count("-") + msa[:, i].count("?")
+        if n_gaps <= max_gaps:
             keep_i.append(i)
 
     # # extract and merge columns (slower than per seq below)
@@ -150,7 +155,9 @@ def trim_msa(msa, max_gap_frac):
     for r in msa:
         r.seq = Seq("".join([str(r.seq)[i] for i in keep_i]))
         re.append(r)
-    return(MultipleSeqAlignment(re))
+    re
+        
+    return(MultipleSeqAlignment(re, column_annotations={"orig_i": keep_i}))
 
 def mask_term_gaps(msa, char="?"):
     n_cols = msa.get_alignment_length()
