@@ -7,6 +7,7 @@ Usage:
   mbc-prime [options] -t INT <msa.fa>
 
 Options:
+  -m --mismatches INT     target number of mismatches for sequences to exclude [default: 2]
   -t --target-seqs INT    number of target sequences (from top of alignment)
   -l --primer-length INT  primer length [default: 20]
   -s --score NUM          minimum score for both conservation and discrimination
@@ -49,13 +50,14 @@ def main():
     if len(sys.argv) == 1:
         sys.argv.append('-h')
 
-    opt = docopt(__doc__, version='mbc-prime v0.4.0', options_first=True)
+    opt = docopt(__doc__, version='mbc-prime v0.5.0', options_first=True)
     logging.info(opt)
     min_score = float(opt['--score'])
     primer_length = int(opt['--primer-length'])
     x = int(opt['--target-seqs'])
     beta = float(opt['--beta'])
     reverse = opt['--reverse']
+    mm = int(opt['--mismatches'])
     min_canon_frac = .2
     max_ambig_frac = .2
 
@@ -115,7 +117,7 @@ def main():
         b_sum = sum([a[i] for i in ['b0','b1','b2', 'b3', 'b-1', 'b?']])
         b_frc = [round(a[i]/b_sum, 2) for i in ['b0','b1','b2','b3', 'b-1', 'b?']]
         ab_score = round(sum(np.subtract(
-            np.cumsum(a_frc[0:2]), np.cumsum(b_frc[0:2])))/2, 2)
+            np.cumsum(a_frc[0:mm]), np.cumsum(b_frc[0:mm])))/mm, 2)
         # too many seqs with ambigious chars (term gaps, Ns, ..)
         if a_frc[5] > max_ambig_frac or b_frc[5] > max_ambig_frac:
             continue
