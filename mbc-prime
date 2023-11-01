@@ -116,8 +116,6 @@ def main():
         b_frc = [round(a[i]/b_sum, 2) for i in ['b0','b1','b2','b3', 'b-1', 'b?']]
         ab_score = round(sum(np.subtract(
             np.cumsum(a_frc[0:2]), np.cumsum(b_frc[0:2])))/2, 2)
-        #t_fwd = sum([j/primer_length if t > 0 else 0 for j,t in enumerate(win_contrast[i]['t_raw'])])
-        #t_rev = sum([j/primer_length if t > 0 else 0 for j,t in enumerate(win_contrast[i]['t_raw'][::-1])])
         # too many seqs with ambigious chars (term gaps, Ns, ..)
         if a_frc[5] > max_ambig_frac or b_frc[5] > max_ambig_frac:
             continue
@@ -125,6 +123,7 @@ def main():
             continue
         if ii+1 != i:
             g+=1
+            print(f"# locus {g}")
         ii = i
 
         #print(win_top[i])
