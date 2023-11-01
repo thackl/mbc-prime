@@ -25,6 +25,7 @@ Options:
 import sys
 import numpy as np
 import re
+import string
 from math import sqrt
 from statistics import mean
 from statistics import median 
@@ -80,35 +81,16 @@ def main():
 
     logging.info(f"• trimmed from {n_cols_raw} to {n_cols} informative columns (<{(1-min_canon_frac) * 100}% gaps)")
 
-    # DEPRECATED: Brute-forcing alignments seems even better
-    # get contrast + conserve score for each col to prefilter promising loci
-    # logging.info("Scoring for contrast and conservation")
-    # col_scores = [score_column(msa[:x, i], msa[x:, i], beta) for i in range(n_cols)]
-    # win_conserve = conserve_window([c['conserve_score'] for c in col_scores], primer_length)
-    # win_contrast = contrast_window([c['contrast_score'] for c in col_scores], primer_length, min_score*.5)
-
-    # win_top = []
-    # for i,(s,t) in enumerate(zip(win_conserve, win_contrast)):
-    #     if s > min_score and t['t'] > min_score:
-    #         t['i'] = i
-    #         win_top.append(t)
-    # logging.info(f"• found {len(win_top)} high-scoring candidate loci")
-            
     # compute edit distances
     logging.info(f"Computing distances for candidate loci")
     win_dist = block_dist(msa, x, primer_length)
-
-    # for i,_ in enumerate(win_top):
-    #     if i%3:
-    #         continue
-    #     a = win_dist[win_top[i]['i']]
     ii = -2
     g = 0
-
     
-    print('group', 'pos', 'trimmed_pos', 'score', 'A: 0,1,2,3,4+ mismatches',
-          'B: 0,1,2,3,4+ mismatches', 'primer A', 'closest B',
-          'A-B-matched', 'A-aligned', 'B-aligned', sep = "\t")
+    # header
+    print('group', 'pos', 'trimmed_pos', 'score', 'inc: 0,1,2,3,4+ mismatches',
+          'exc: 0,1,2,3,4+ mismatches', 'primer forward', 'primer reverse',
+          'inc-exc-matched', 'inc-aligned', 'exc-aligned', 'info', sep = "\t")
     for i,_ in enumerate(win_dist):
 
         a = win_dist[i]
@@ -131,7 +113,7 @@ def main():
         #print(win_top[i])
         # print(round(win_conserve[i], 2), round(win_contrast[i]['t']/2, 2),
         #       sep="\t", end="\t")
-        print(g, msa_orig_i[i]+1, i+1, ab_score, a_frc[0:4], b_frc[0:4], a["a_rep"], a["matched_aligned"],
+        print(g, msa_orig_i[i]+1, i+1, ab_score, a_frc[0:4], b_frc[0:4], a["a_rep"], rc(a["a_rep"]), a["matched_aligned"],
               a["target_aligned"], a["query_aligned"], _, sep="\t")
     sys.exit()
         
@@ -140,6 +122,10 @@ def main():
 
     print(f"Found {len(contrasts)} high-scoring loci")
 
+def rc(x):
+    x=x.translate(x.maketrans("atgcuATGCU", "tacgaTACGA"))
+    return(x[::-1])
+    
 def trim_msa(msa, min_canon_frac):
     n_cols = msa.get_alignment_length()
     n_rows = len(msa)
