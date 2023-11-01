@@ -75,11 +75,14 @@ def main():
 
     msa = mask_term_gaps(msa) # replace term gaps with ?
     n_cols = msa.get_alignment_length()
+    msa_trimmed_file = opt['<msa.fa>'] + ".trimmed"
 
-    with open(opt['<msa.fa>'] + "trimmed", "w") as handle:
-        AlignIO.write(msa, handle, "fasta")
-
+    
     logging.info(f"• trimmed from {n_cols_raw} to {n_cols} informative columns (<{(1-min_canon_frac) * 100}% gaps)")
+
+    with open(msa_trimmed_file, "w") as handle:
+        AlignIO.write(msa, handle, "fasta")
+    logging.info(f"• wrote trimmed msa to '{msa_trimmed_file}'")
 
     # compute edit distances
     logging.info(f"Computing distances for candidate loci")
@@ -115,12 +118,8 @@ def main():
         #       sep="\t", end="\t")
         print(g, msa_orig_i[i]+1, i+1, ab_score, a_frc[0:4], b_frc[0:4], a["a_rep"], rc(a["a_rep"]), a["matched_aligned"],
               a["target_aligned"], a["query_aligned"], _, sep="\t")
-    sys.exit()
-        
-    # maximize left-/rightness of contrast columns
 
-
-    print(f"Found {len(contrasts)} high-scoring loci")
+    logging.info(f"Found {g} above-threshold candidate loci for primer design")
 
 def rc(x):
     x=x.translate(x.maketrans("atgcuATGCU", "tacgaTACGA"))
