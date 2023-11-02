@@ -55,7 +55,7 @@ def main():
     if len(sys.argv) == 1:
         sys.argv.append('-h')
 
-    opt = docopt(__doc__, version='mbc-prime v0.5.0', options_first=True)
+    opt = docopt(__doc__, version='mbc-prime v0.6.0', options_first=True)
     
     logging.basicConfig(
         level=logging.DEBUG if opt['--verbose'] else logging.INFO,
@@ -105,11 +105,17 @@ def main():
 
         a = win_dist[i]
         a_sum = sum([a[i] for i in ['a0','a1','a2', 'a3', 'a-1', 'a?']])
-        a_frc = [round(a[i]/a_sum, 2) for i in ['a0','a1','a2', 'a3', 'a-1', 'a?']]
+        a_frc = [a[i]/a_sum for i in ['a0','a1','a2', 'a3', 'a-1', 'a?']]
+        a_cum = np.cumsum(a_frc)
         b_sum = sum([a[i] for i in ['b0','b1','b2', 'b3', 'b-1', 'b?']])
-        b_frc = [round(a[i]/b_sum, 2) for i in ['b0','b1','b2','b3', 'b-1', 'b?']]
+        b_frc = [a[i]/b_sum for i in ['b0','b1','b2','b3', 'b-1', 'b?']]
+        b_cum = np.cumsum(b_frc)
         ab_score = round(sum(np.subtract(
             np.cumsum(a_frc[0:mm]), np.cumsum(b_frc[0:mm])))/mm, 2)
+
+        # too many gaps in primer
+        if a["a_rep"].count('-') > 3:
+            continue
         # too many seqs with ambigious chars (term gaps, Ns, ..)
         if a_frc[5] > max_ambig_frac or b_frc[5] > max_ambig_frac:
             continue
@@ -123,7 +129,8 @@ def main():
         #print(win_top[i])
         # print(round(win_conserve[i], 2), round(win_contrast[i]['t']/2, 2),
         #       sep="\t", end="\t")
-        print(g, msa_orig_i[i]+1, i+1, ab_score, a_frc[0:4], b_frc[0:4], a["a_rep"], rc(a["a_rep"]), a["matched_aligned"],
+        print(g, msa_orig_i[i]+1, i+1, ab_score, rl(a_cum[0:5], 2), rl(b_cum[0:5], 2),
+              a["a_rep"], rc(a["a_rep"]), a["matched_aligned"],
               a["target_aligned"], a["query_aligned"], _, sep="\t")
 
     logging.info(f"Found {g} above-threshold candidate loci for primer design")
@@ -131,6 +138,9 @@ def main():
 def rc(x):
     x=x.translate(x.maketrans("atgcuATGCU", "tacgaTACGA"))
     return(x[::-1])
+
+def rl(l, digits=0):
+    return([round(x, digits) for x in l])
     
 def trim_msa(msa, min_canon_frac):
     n_cols = msa.get_alignment_length()
