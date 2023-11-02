@@ -18,6 +18,16 @@ Options:
                           bases [default: 0.2]
   -v --verbose            print verbose information, such as partial alignments
                           for each primer locus
+
+Known limitations:
+• If the primer regions itself contains gaps, which could correspond to bases
+  not present in exclusion set, and could be useful in constructing discriminative
+  primers, these gaps are reported as is and the primer window is not extended to
+  include the adjacant bases, which would be necessary to produce a complete
+  primer
+• Primer candidates are not checked for potential hits to other locations in the
+  provided sequence set
+
 """
 
 import sys
