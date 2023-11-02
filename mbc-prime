@@ -7,19 +7,17 @@ Usage:
   mbc-prime [options] -t INT <msa.fa>
 
 Options:
-  -m --mismatches INT     target number of mismatches for sequences to exclude [default: 2]
-  -t --target-seqs INT    number of target sequences (from top of alignment)
   -l --primer-length INT  primer length [default: 20]
-  -s --score NUM          minimum score for both conservation and discrimination
-                          [default: 0.5]
+  -t --target-seqs INT    number of target sequences (from top of alignment)
+  -s --min-score NUM      minimum score to report a locus [default: 0.5]
+  -m --mismatches INT     target number of mismatches for sequences to exclude
+                          [default: 2]
+  --min-canon-col NUM     trim columns with less than this fraction of non-gap/
+                          ambiguous bases (not atgcuATGCU) [default: 0.2]
+  --max-ambig-win NUM     ignore primer windows with more than this many ambigious
+                          bases [default: 0.2]
   -v --verbose            print verbose information, such as partial alignments
                           for each primer locus
-
-  -b --beta NUM           Use F-score instead of Matthews correlation coefficient.
-                          Use `-b=1` for regular F-score/F1. Other values for
-                          F-beta scoring emphazising either False Positives or
-                          True Negative. [default: -1]
-  -r --reverse            Shifts the window where conservation is calculated to a window for a reverse primer
 """
 
 import sys
@@ -41,10 +39,6 @@ import edlib
 
 import logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(levelname)s %(asctime)s] %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%SZ")
 
 def main():
 
@@ -52,16 +46,19 @@ def main():
         sys.argv.append('-h')
 
     opt = docopt(__doc__, version='mbc-prime v0.5.0', options_first=True)
-    logging.info(opt)
-    min_score = float(opt['--score'])
+    
+    logging.basicConfig(
+        level=logging.DEBUG if opt['--verbose'] else logging.INFO,
+        format="[%(levelname)s %(asctime)s] %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%SZ")
+
+    logging.debug(opt)
     primer_length = int(opt['--primer-length'])
     x = int(opt['--target-seqs'])
-    beta = float(opt['--beta'])
-    reverse = opt['--reverse']
     mm = int(opt['--mismatches'])
-    min_canon_frac = .2
-    max_ambig_frac = .2
-
+    min_score = float(opt['--min-score'])
+    min_canon_frac = float(opt['--min-canon-col'])
+    max_ambig_frac = float(opt['--max-ambig-win'])
     
     # read msa
     logging.info("Importing MSA")
@@ -135,11 +132,6 @@ def trim_msa(msa, min_canon_frac):
         if canon(msa[:, i]) >= min_canon:
             keep_i.append(i)
 
-    # # extract and merge columns (slower than per seq below)
-    # keep_cols = [msa[:,i:i+1] for i in keep_i]
-    # re = functools.reduce(lambda a, b: a+b, keep_cols)
-    # return(re)
-
     # extract non-gap slices per seq and build new MSA
     re = []
     for r in msa:
@@ -163,88 +155,7 @@ def mask_term_gaps(msa, char="?"):
 
     return(MultipleSeqAlignment(re))
 
-def score_column(a, b, beta=-1):
-    an = Counter(a)
-    bn = Counter(b)
-    (ac, TP) = an.most_common(1)[0]
-    (bc, bnmc) = bn.most_common(1)[0]
-
-    re = {
-        'contrast_score': 0,
-        'conserve_score': 0,
-        'char_a': ac,
-        'char_b': bc,
-        'counts_a': an,
-        'counts_b': bn
-    }
-
-    if ac == '-':
-        return(re)
-
-    tn = len(a) - an['-']
-    FN = tn - TP
-    FP = bn[ac]
-    TN = len(b) - FP - bn['-']
-
-    re['conserve_score'] = TP/tn
-    if beta < 0:
-        re['contrast_score'] = mcc(TP, TN, FP, FN)
-    else:
-        re['contrast_score'] = fbeta(TP, FN, FP, float(beta))
-
-    return(re)
     
-# https://en.wikipedia.org/wiki/Phi_coefficient
-def mcc(TP, TN, FP, FN):
-    denom = (TP+FP) * (TP+FN) * (TN+FP) * (TN+FN)
-    if denom == 0:
-        denom = 1
-    else:
-        denom = sqrt(denom)
-        
-    return((TP * TN - FP * FN) / denom)
-
-# https://en.wikipedia.org/wiki/F-score
-def fbeta(TP, FN, FP, beta):
-    b2 = beta**2
-    return((1+b2)*TP / ((1+b2)*TP + b2*FN + FP))
-
-# https://en.wikipedia.org/wiki/F-score
-def fscore(TP, FN, FP):
-    return(2*TP / (2*TP + FN + FP))
-
-def fkoert(TP, FN, FP, penalty):
-    return(2*TP / (2*TP + FN + penalty*FP)) #F = 2TP
-
-def conserve_window(x, window_size):
-    i = 0
-    means = [] 
-
-    while i < len(x) - window_size + 1: 
-        window = x[i : i + window_size] 
-        means.append(sum(window) / window_size)
-        i += 1
-        
-    return(means)
-
-def contrast_window(x, window_size, min_score):
-    i = 0
-    scores = list()
-    
-    while i < len(x) - window_size + 1: 
-        w = x[i : i + window_size]
-        w = top_q(w, min_score) # ignore lower scores
-        scores.append({
-            "t": sum(w),
-            "t_raw": w,
-        })
-        i += 1
-
-    return(scores)
-
-def top_q(x, q=.5, low=0):
-    r = [low if k < q else k for k in x]
-    return(r)
 
 # compute distance between each uniq seq of a msa block and the most abundant
 # uniq seq in the block
@@ -312,7 +223,6 @@ def canon(x, canon_chars = "[atgcuATGCU]"):
 def ambig(x, canon_chars = "[^atgcuATGCU-]"):
     return(len(re.findall(canon_chars, x)))
 
-
 def block_count(msa_block, max_ambig = 0):
     block = [str(b.seq) for b in msa_block]
     block = ['?' if ambig(s) > max_ambig else s for s in block]
@@ -338,84 +248,3 @@ def dist_uniq(block_uniq, ref, pre):
 
 if __name__ == "__main__":
     main()
-
-
-#- DEPRECATED ------------------------------------------------------------
-def contrast_window_weighted(x, window_size, reverse=False):
-    i = 0
-    scores = list()
-    weights = [(window_size - j) / window_size for j in range(window_size)]
-    if not reverse:
-        weights.reverse()
-    
-    while i < len(x) - window_size + 1: 
-        w = x[i : i + window_size]
-        w = top_q(w) # ignore lower scores
-        s = [w[j] * weights[j] for j,_ in enumerate(w)] # weight scores by position
-        scores.append({
-            "t": sum(s),
-            "t_raw": list(filter(lambda x: x > 0 , w)),
-            "t_wgt": list(filter(lambda x: x > 0 , s))
-         })
-        i += 1
-
-    return(scores)
-
-def contrast_msa(msa, x, primer_length, min_score, beta):
-
-    n_cols = msa.get_alignment_length()
-
-    # score each column
-    col_scores = [score_column(msa[:x, i], msa[x:, i], beta) for i in range(n_cols)]
-
-    # aggregate across windows
-    win_conserve = conserve_window([c[3] for c in cols], primer_length)
-    contrast_fwd = contrast_window([c[2] for c in cols], primer_length)
-    contrast_rev = contrast_window([c[2] for c in cols], primer_length, reverse=True)
-    # inefficient, could compute consense windows only as needed after filter
-    consense = consense_window([(c[0], c[1]) for c in cols], primer_length)
-
-    wins_fwd = []
-    wins_rev = []
-    # filter windows
-    for i,s in enumerate(conserve):
-        if s > min_score:
-            
-            if contrast_fwd[i]["t"] > min_score:
-                wins_fwd.append({
-                    "start": i,
-                    "s": round(conserve[i], 2),
-                    "diff": consense[i],
-                    "t": round(contrast_fwd[i]["t"], 2),
-                    "t_wgt": [round(x, 2) for x in contrast_fwd[i]["t_wgt"]],
-                    "t_raw": [round(x, 2) for x in contrast_fwd[i]["t_raw"]]
-                })
-            if contrast_rev[i]["t"] > min_score:
-                wins_rev.append({
-                    "start": i,
-                    "s": conserve[i],
-                    "t": contrast_rev[i]["t"],
-                    "diff_fwd": consense[i]
-                })
-
-    return(wins_fwd)
-
-def gap_trim(seqs):
-    seqs = [s.replace("-", "").replace("?", "") for s in seqs]
-    return(seqs)
-
-def consense_pair(a, b):
-    if a == b:
-        return "."
-    return(a)
-
-def consense_window(x, window_size):
-    i = 0
-    x = [consense_pair(a,b) for a,b in x]
-    consensi = []
-    
-    while i < len(x) - window_size + 1: 
-        consensi.append("".join(x[i : i + window_size]))
-        i += 1
-
-    return(consensi)
