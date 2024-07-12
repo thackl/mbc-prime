@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 
-"""mbc-prime
-Find group-specific primer binding sites for amplicon metabarcoding
+"""mbc-prime - find group-specific primer binding sites for amplicon metabarcoding
+
+Citation:
+• Ting He, Koert Jansonius, Bahar Sevgin, Thomas Hackl, Kristina Haslinger; ...
+• Martin Šošić, Mile Šikić; Edlib: a C/C ++ library for fast, exact sequence
+  alignment using edit distance. Bioinformatics 2017 btw753. doi:
+  10.1093/bioinformatics/btw753
 
 Usage:
   mbc-prime [options] -t INT <msa.fa>
@@ -140,7 +145,7 @@ def rc(x):
     return(x[::-1])
 
 def rl(l, digits=0):
-    return([round(x, digits) for x in l])
+    return([round(x.item(), digits) for x in l])
     
 def trim_msa(msa, min_canon_frac):
     n_cols = msa.get_alignment_length()
