@@ -1,21 +1,155 @@
+mbc-prime: host-exclusive primer design for effective holobiont metabarcoding
+
+Need to sensitively amplify marker genes (18S, 16S, COI, ...) of one taxonomic
+group while excluding another? Woory not and give mbc-prime a try!
+
+mbc-prime scores candiate locations for amplicon sequencing primers with the
+highest similarities among all species of interest while exhibiting a maximum
+amount differences to species that you want to exclude. Such distinctive primers
+are ideal for metabarcoding of host-associated microbiomes, such as fungi of
+plants, where the host DNA otherwise would dominate the marker gene pool.
+
 ** Usage
 
 #+begin_src sh
 # download workflow
 git clone https://github.com/thackl/mbc-prime
+cd mbc-prime
 
-mbc-prime -h                          # show help
-mbc-prime [options] -t INT <msa.fa>   # run tool
+# install the dependencie, either with conda/mamba
+mamba create -n mbc-prime python=3.11
+mamba activate mbc-prime 
+mamba env update --file env.yaml
+
+# or via pip
+pip install numpy biopython docopt python-edlib
+
+# run the tool
+mbc-prime -h                                       # show help
+mbc-prime [options] -t INT <msa.fa> > primers.tsv  # run tool
 #+end_src
 
-** Input
-- =msa.fa= :: multiple-sequence alignment of region of interest with target
-  group sequences at the top and sequences to exclude at the bottom.
+** Required Input
+mbc-prime needs a multiple-sequence alignment in fasta format (=msa.fa=) of the
+marker gene or region of interest with a known number of target group sequences
+at the top (=-t=) and sequences to exclude at the bottom. This could be
+something like 100 18S SSU sequences from diverse fungal species as targets and
+some plant 18S SSU sequences to exclude.
+
+Such sequences can be downloaded from the respective databases (NCBI, SILVA,
+UNITE, ...), put in a single file, and aligned with common alignment tools
+(MAFFT, muscle, ...). Trimming of the alg
 
 ** Output
-TODO...
+mbc-prime produces a tab-separated table with annotations for different candidate loci suitable for primer design. See the example below. The table comprises the following fields:
 
-The pipeline produces the following final files in =results/=:
-- =<sample_id>_classified.tsv= :: tab-separated file with one line per classified query with the fields:
-  =query_id, query_tophit_identity, query_tophit_coverage, query_tophits_consensus_lineage=
+- group :: locus number of the distinctive primer. There are often multiple
+  overlapping primers from the same location with good scores.
+- pos :: start position of the primer in the multiple sequence alignment
+- trimmed_pos :: position of the primer in the gap-column trimmed multiple
+  sequence alignments. This trimmed alignment is produced by mbc-prime during
+  runtime and can be found in the run folder named =<msa.fa>.trimmed=.
+- score :: the aggregated score of the primer ranging from 0-1, with 1
+  capaturing 100% of targets while excluding 100% of other sequences.
+- inc: 0,1,2,3,4+ mismatches :: a comma-separated list of cummulative fractions
+  of target sequences with 0, 1, 2, 3, 4 or more mismatches to the proposed
+  primer. Ideally 100% of targets have 0 mismatches, altought this is rarely
+  achievable in practice. But having high percentages at 0 and 1 mismatch
+  indicate a target-sensitive primer. In the example below, 76% of target
+  sequences have 0 mismatches to the primer, 86% have at most 1 mismatch.
+- exc: 0,1,2,3,4+ mismatches :: a comma-separated list of cummulative fractions
+  of sequences to exclude with 0, 1, 2, 3, 4 or more mismatches to the proposed
+  primer. Ideally 0% of sequences to exclude have 0 or 1 mismatches to ensure
+  that these sequences are not amplified.
+- primer forward :: the sequence of the identified primer
+- primer reverse :: the reverse sequence of the identified primer
+- inc-exc-matched :: a visual representation of the alignment between the target
+  group consensus primer and the consensus primer of the sequences to exclude.
+- inc-aligned :: the aligned target consensus primer
+- exc-aligned :: the aligned consensus sequence of sequences to exclude.
+- info :: additional information as used by mbc-prime internally
 
+Example output
+#+begin_export ascii
+group   pos     trimmed_pos     score   inc: 0,1,2,3,4+ mismatches      exc: 0,1,2,3,4+ mismatches      primer forward  primer reverse  inc-exc-matched inc-aligned     exc-aligned     info
+# locus 1
+1       136     46      0.78    [0.71, 0.86, 0.87, 0.87, 1.0]   [0.0, 0.0, 0.84, 0.88, 1.0]     gccaugcaugucuaaguaua    tatacttagacatgcatggc    |||||||||||.|||||||.    gccaugcauguguaaguaug    gccaugcaugucuaaguaua    {'a0': 59, 'a1': 12, 'a2': 1, 'a3': 0, 'a-1': 11, 'a?': 0, 'b0': 0, 'b1': 0, 'b2': 21, 'b3': 1, 'b-1': 3, 'b?': 0, 'a_rep': 'gccaugcaugucuaaguaua', 'b_rep': 'gccaugcauguguaaguaug', 'query_aligned': 'gccaugcaugucuaaguaua', 'matched_aligned': '|||||||||||.|||||||.', 'target_aligned': 'gccaugcauguguaaguaug'}
+1       137     47      0.76    [0.73, 0.82, 0.87, 0.87, 1.0]   [0.0, 0.04, 0.84, 0.88, 1.0]    ccaugcaugucuaaguauaa    ttatacttagacatgcatgg    ||||||||||.|||||||.|    ccaugcauguguaaguauga    ccaugcaugucuaaguauaa    {'a0': 62, 'a1': 8, 'a2': 4, 'a3': 0, 'a-1': 11, 'a?': 0, 'b0': 0, 'b1': 1, 'b2': 20, 'b3': 1, 'b-1': 3, 'b?': 0, 'a_rep': 'ccaugcaugucuaaguauaa', 'b_rep': 'ccaugcauguguaaguauga', 'query_aligned': 'ccaugcaugucuaaguauaa', 'matched_aligned': '||||||||||.|||||||.|', 'target_aligned': 'ccaugcauguguaaguauga'}
+...
+#+end_export
+
+** Known limitations
+If the primer regions itself contains gaps, which could correspond to bases not
+present in exclusion set, and could be useful in constructing discriminative
+primers, these gaps are reported as is and the primer window is not extended to
+include the adjacant bases, which would be necessary to produce a complete
+primer
+
+Primer candidates are not checked for potential hits to other locations in the
+provided sequence set
+
+** Tutorial with example data
+
+#+begin_src sh
+cd fungal-endophyte-primer
+
+# run mbc-prime on an MSA of 118 fungi and 46 Gentianales (plant host) sequences
+../mbc-prime -t 118 SSU_fun_gent_align_45ep.aln > SSU-mbc-prime.tsv
+
+# progress log with info about the MSA and the amount of possible primer sites
+[INFO 2024-07-12T11:47:20Z] Importing MSA
+[INFO 2024-07-12T11:47:21Z] Trimming internal and masking terminal gaps
+[INFO 2024-07-12T11:47:21Z] • max gaps/ambigious per column: 131
+[INFO 2024-07-12T11:47:21Z] • trimmed from 3929 to 1835 informative columns (<80.0% gaps)
+[INFO 2024-07-12T11:47:21Z] • wrote trimmed msa to 'SSU_fun_gent_align_45ep.aln.trimmed'
+[INFO 2024-07-12T11:47:21Z] Computing distances for candidate loci
+[INFO 2024-07-12T11:47:22Z] Found 17 above-threshold candidate loci for primer design
+#+end_src
+
+** TODO
+#+begin_src sh
+Tutorial 1. A step-by-step tutorial for using mbc-prime 
+
+
+ ~/mbc-prime/mbc-prime -t 118 Comb_align_45ep.aln 
+
+ 
+
+#To save this to csv: 
+
+~/mbc-prime/mbc-prime -t 118 Comb_align_45ep.aln >> testalignment.csv 
+
+ 
+
+#to change score:  
+
+~/mbc-prime/mbc-prime -t 118 -s 0.8 Comb_align_45ep.aln 
+
+ 
+
+#To run mafft (change location) 
+
+bash ~/primerdesign/MAFFT/mafft-linux64/mafft.bat 
+
+ 
+
+#to view alignment 
+
+aliview fungi.aln 
+
+ 
+
+#Move group of sequences (fungi in this case) to another file 
+
+seqkit grep -nrp Fungi LSUdownsample.fa >> newfile.fa 
+
+seqkit grep -nrp Gentianales LSU_gent.fa >> newfile.fa 
+
+ 
+
+#count sequences with specific word in their header in a file 
+
+seqkit grep -nrCp Fungi newfile.fa 
+
+ 
+#+end_src
