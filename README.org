@@ -1,13 +1,18 @@
-mbc-prime: host-exclusive primer design for effective holobiont metabarcoding
+* mbc-prime: host-exclusive primer design for effective holobiont metabarcoding
 
-Need to sensitively amplify marker genes (18S, 16S, COI, ...) of one taxonomic
-group while excluding another? Woory not and give mbc-prime a try!
+/Do you need to sensitively amplify marker genes (18S, 16S, COI, ...) of one
+taxonomic group while excluding another? Give mbc-prime a try!/
 
 mbc-prime scores candiate locations for amplicon sequencing primers with the
 highest similarities among all species of interest while exhibiting a maximum
 amount differences to species that you want to exclude. Such distinctive primers
 are ideal for metabarcoding of host-associated microbiomes, such as fungi of
 plants, where the host DNA otherwise would dominate the marker gene pool.
+
+[[file:img/mbc-prime_2024-07-12_22-21-01.png]] 
+
+Fig: Three candiate primer sites in fungal 18S LSU sequences that are conserved among
+fungi but differ by at least on position from plant
 
 ** Usage
 
@@ -69,14 +74,14 @@ mbc-prime produces a tab-separated table with annotations for different candidat
 - exc-aligned :: the aligned consensus sequence of sequences to exclude.
 - info :: additional information as used by mbc-prime internally
 
-Example output
-#+begin_export ascii
+*Example output*
+#+begin_src
 group   pos     trimmed_pos     score   inc: 0,1,2,3,4+ mismatches      exc: 0,1,2,3,4+ mismatches      primer forward  primer reverse  inc-exc-matched inc-aligned     exc-aligned     info
 # locus 1
 1       136     46      0.78    [0.71, 0.86, 0.87, 0.87, 1.0]   [0.0, 0.0, 0.84, 0.88, 1.0]     gccaugcaugucuaaguaua    tatacttagacatgcatggc    |||||||||||.|||||||.    gccaugcauguguaaguaug    gccaugcaugucuaaguaua    {'a0': 59, 'a1': 12, 'a2': 1, 'a3': 0, 'a-1': 11, 'a?': 0, 'b0': 0, 'b1': 0, 'b2': 21, 'b3': 1, 'b-1': 3, 'b?': 0, 'a_rep': 'gccaugcaugucuaaguaua', 'b_rep': 'gccaugcauguguaaguaug', 'query_aligned': 'gccaugcaugucuaaguaua', 'matched_aligned': '|||||||||||.|||||||.', 'target_aligned': 'gccaugcauguguaaguaug'}
 1       137     47      0.76    [0.73, 0.82, 0.87, 0.87, 1.0]   [0.0, 0.04, 0.84, 0.88, 1.0]    ccaugcaugucuaaguauaa    ttatacttagacatgcatgg    ||||||||||.|||||||.|    ccaugcauguguaaguauga    ccaugcaugucuaaguauaa    {'a0': 62, 'a1': 8, 'a2': 4, 'a3': 0, 'a-1': 11, 'a?': 0, 'b0': 0, 'b1': 1, 'b2': 20, 'b3': 1, 'b-1': 3, 'b?': 0, 'a_rep': 'ccaugcaugucuaaguauaa', 'b_rep': 'ccaugcauguguaaguauga', 'query_aligned': 'ccaugcaugucuaaguauaa', 'matched_aligned': '||||||||||.|||||||.|', 'target_aligned': 'ccaugcauguguaaguauga'}
 ...
-#+end_export
+#+end_src
 
 ** Known limitations
 If the primer regions itself contains gaps, which could correspond to bases not
